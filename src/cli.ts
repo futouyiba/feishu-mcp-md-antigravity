@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "dotenv/config";
 import { Command } from "commander";
 import { exportDoc } from "./core/export-doc.js";
 import { exportWiki } from "./core/export-wiki.js";

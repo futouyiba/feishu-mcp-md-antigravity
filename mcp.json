@@ -1,0 +1,16 @@
+{
+    "mcpServers": {
+        "feishu-mcp-md": {
+            "command": "npx",
+            "args": [
+                "tsx",
+                "src/mcp/server.ts"
+            ],
+            "cwd": ".",
+            "env": {
+                "FEISHU_APP_ID": "${FEISHU_APP_ID}",
+                "FEISHU_APP_SECRET": "${FEISHU_APP_SECRET}"
+            }
+        }
+    }
+}
