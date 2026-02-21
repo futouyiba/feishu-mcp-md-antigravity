@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { DocAstSchema } from "../types/docast.js";
+import { authService } from "../auth/index.js";
 
 export interface ImageCaption {
   role: "diagram" | "screenshot" | "chart" | "photo" | "whiteboard" | "unknown";
@@ -61,12 +62,10 @@ function guessMime(imagePath: string): string {
 }
 
 class OpenAIImageCaptioner implements ImageCaptioner {
-  private readonly apiKey: string;
   private readonly model: string;
   private readonly baseUrl: string;
 
-  constructor(params: { apiKey: string; model?: string; baseUrl?: string }) {
-    this.apiKey = params.apiKey;
+  constructor(params: { model?: string; baseUrl?: string }) {
     this.model = params.model ?? "gpt-5.2";
     this.baseUrl = params.baseUrl ?? "https://api.openai.com/v1";
   }
@@ -111,12 +110,11 @@ class OpenAIImageCaptioner implements ImageCaptioner {
       strict: true,
     };
 
-    const response = await fetch(`${this.baseUrl}/responses`, {
+    const requestOptions: RequestInit = {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json",
-      },
+      } as Record<string, string>,
       body: JSON.stringify({
         model: this.model,
         text: {
@@ -147,7 +145,22 @@ class OpenAIImageCaptioner implements ImageCaptioner {
           },
         ],
       }),
-    });
+    };
+
+    try {
+      // Use the new standard Auth Subsystem
+      await authService.injectAuth("openai", requestOptions);
+    } catch (err) {
+      // Fallback for backward compatibility if user hasn't run `auth login openai`
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (apiKey) {
+        (requestOptions.headers as Record<string, string>)["Authorization"] = `Bearer ${apiKey}`;
+      } else {
+        throw new Error("Auth required: Run `feishu-md-export auth login openai` or set OPENAI_API_KEY env var");
+      }
+    }
+
+    const response = await fetch(`${this.baseUrl}/responses`, requestOptions);
 
     if (!response.ok) {
       const body = await response.text();
@@ -203,12 +216,7 @@ function buildCaptioner(params: {
   if (provider === "mock") {
     return new MockImageCaptioner();
   }
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error("OPENAI_API_KEY is required for provider=openai");
-  }
   return new OpenAIImageCaptioner({
-    apiKey,
     model: params.model ?? process.env.OPENAI_MODEL ?? "gpt-5.2",
     baseUrl: process.env.OPENAI_BASE_URL,
   });
@@ -229,12 +237,14 @@ export async function digestImages(params: {
     readFile(params.markdownPath, "utf8"),
   ]);
   const docAst = DocAstSchema.parse(JSON.parse(docAstRaw));
-  const captioner =
-    params.captioner ?? buildCaptioner({ provider: params.provider, model: params.model });
   const fallbackToMockOnError = params.fallbackToMockOnError ?? true;
   const envConcurrency = Number.parseInt(process.env.DIGEST_CONCURRENCY ?? "3", 10);
   const concurrency = params.concurrency ?? (Number.isFinite(envConcurrency) ? envConcurrency : 3);
   const fallbackCaptioner = new MockImageCaptioner();
+
+  // Note: captioner can be injected/overridden for testing
+  const captioner =
+    params.captioner ?? buildCaptioner({ provider: params.provider, model: params.model });
 
   const tasks: Array<{
     assetId: string;

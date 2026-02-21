@@ -4,6 +4,7 @@ import { Command } from "commander";
 import { exportDoc } from "./core/export-doc.js";
 import { exportWiki } from "./core/export-wiki.js";
 import { digestImages } from "./core/digest-images.js";
+import { authService } from "./auth/index.js";
 
 const program = new Command();
 
@@ -57,6 +58,40 @@ program
       concurrency: Number.parseInt(String(options.concurrency), 10),
       fallbackToMockOnError: Boolean(options.fallbackMock),
     });
+  });
+
+const authCmd = program.command("auth").description("Manage OAuth connections for AI providers");
+
+authCmd
+  .command("login <provider>")
+  .description("Authenticate with a provider (e.g. openai, google)")
+  .action(async (provider) => {
+    await authService.connect(String(provider));
+  });
+
+authCmd
+  .command("logout <provider>")
+  .description("Remove authentication for a provider")
+  .action(async (provider) => {
+    await authService.disconnect(String(provider));
+  });
+
+authCmd
+  .command("list")
+  .description("List active authenticated providers")
+  .action(async () => {
+    const list = await authService.listConnections();
+    if (list.length === 0) {
+      // eslint-disable-next-line no-console
+      console.log("No active connections.");
+    } else {
+      // eslint-disable-next-line no-console
+      console.log("Active connections:");
+      for (const conn of list) {
+        // eslint-disable-next-line no-console
+        console.log(`- ${conn.provider} (expires: ${new Date(conn.expiresAt).toLocaleString()})`);
+      }
+    }
   });
 
 program.parseAsync(process.argv).catch((err: unknown) => {
